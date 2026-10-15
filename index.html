@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Joguinho de Damas - HTML5 & Bot</title>
+    <title>Joguinho de Damas - Online & Bot</title>
+    <!-- Importa a biblioteca PeerJS para conexao P2P online -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body {
@@ -19,6 +21,32 @@
         h1 { font-size: 1.8rem; margin-bottom: 6px; color: #38bdf8; letter-spacing: 1px; }
         #status { font-size: 1.1rem; margin-bottom: 16px; color: #94a3b8; font-weight: 500; }
         
+        .screen { display: none; flex-direction: column; align-items: center; }
+        .screen.active { display: flex; }
+
+        .menu-box {
+            background: #1e293b;
+            padding: 30px;
+            border-radius: 14px;
+            border: 1px solid #334155;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            width: 320px;
+            text-align: center;
+        }
+        .menu-box h2 { color: #f8fafc; margin-bottom: 4px; }
+        .menu-box input {
+            background: #0f172a;
+            border: 1px solid #475569;
+            color: #fff;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 1rem;
+            text-align: center;
+        }
+
         .container {
             display: flex;
             gap: 24px;
@@ -116,6 +144,8 @@
         button:hover { background-color: #00e676; }
         button.btn-danger { background-color: #ef4444; color: #fff; }
         button.btn-danger:hover { background-color: #f87171; }
+        button.btn-secondary { background-color: #38bdf8; color: #0f172a; }
+        button.btn-secondary:hover { background-color: #7dd3fc; }
 
         #game-modal {
             position: absolute;
@@ -130,47 +160,162 @@
         }
         #game-modal h2 { font-size: 2.2rem; margin-bottom: 12px; color: #facc15; text-align: center; }
         #game-modal p { font-size: 1.1rem; color: #94a3b8; margin-bottom: 20px; text-align: center; }
-        .modal-buttons { display: flex; gap: 12px; }
+        .modal-buttons { display: flex; gap: 10px; }
     </style>
 </head>
 <body>
 
     <h1>JOGO DE DAMAS</h1>
-    <div id="status">Sua vez (Brancas)</div>
 
-    <div class="container">
-        <div id="board"></div>
-
-        <div class="sidebar">
-            <div class="panel">
-                <h3>PECAS BRANCAS (Você)</h3>
-                <p id="count-white">12</p>
-            </div>
-            <div class="panel">
-                <h3>PECAS PRETAS (Bot)</h3>
-                <p id="count-black">12</p>
-            </div>
-            <button onclick="resetGame()">Reiniciar Jogo</button>
-            <button class="btn-danger" onclick="playerSurrender()">Desistir da Partida</button>
+    <!-- TELA 1: MENU PRINCIPAL -->
+    <div id="screen-menu" class="screen active">
+        <div class="menu-box">
+            <h2>Modo de Jogo</h2>
+            <button onclick="startBotGame()">Jogar contra o Bot</button>
+            <button class="btn-secondary" onclick="showOnlineMenu()">Modo Online (Com Amigo)</button>
         </div>
+    </div>
 
-        <div id="game-modal">
-            <h2 id="modal-title">Fim de Jogo</h2>
-            <p id="modal-desc">O jogo chegou ao fim.</p>
-            <div class="modal-buttons">
-                <button onclick="resetGame()">Jogar Novamente</button>
+    <!-- TELA 2: MENU ONLINE -->
+    <div id="screen-online" class="screen">
+        <div class="menu-box">
+            <h2>Partida Online</h2>
+            <button onclick="hostOnlineGame()">Criar Sala</button>
+            <hr style="border-color:#334155;">
+            <input type="text" id="room-code-input" placeholder="Cole o Código da Sala">
+            <button class="btn-secondary" onclick="joinOnlineGame()">Entrar na Sala</button>
+            <button style="background:transparent; color:#94a3b8;" onclick="showScreen('screen-menu')">Voltar</button>
+        </div>
+    </div>
+
+    <!-- TELA 3: JOGO -->
+    <div id="screen-game" class="screen">
+        <div id="status">Aguardando...</div>
+        <div class="container">
+            <div id="board"></div>
+
+            <div class="sidebar">
+                <div class="panel">
+                    <h3 id="label-p1">JOGADOR</h3>
+                    <p id="count-white">12</p>
+                </div>
+                <div class="panel">
+                    <h3 id="label-p2">ADVERSÁRIO</h3>
+                    <p id="count-black">12</p>
+                </div>
+                <button onclick="returnToMenu()">Menu Principal</button>
+                <button class="btn-danger" onclick="playerSurrender()">Desistir</button>
+            </div>
+
+            <div id="game-modal">
+                <h2 id="modal-title">Fim de Jogo</h2>
+                <p id="modal-desc">O jogo chegou ao fim.</p>
+                <div class="modal-buttons">
+                    <button onclick="returnToMenu()">Menu Principal</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        let gameMode = 'bot'; // 'bot' ou 'online'
+        let myRole = 1; // 1 = Brancas, -1 = Pretas
         let board = [];
-        let turn = 1; // 1 = brancas (jogador), -1 = pretas (bot)
+        let turn = 1;
         let selectedPiece = null;
         let validMoves = [];
         let gameOver = false;
         let mustJumpPiece = null;
 
+        let peer = null;
+        let conn = null;
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        function startBotGame() {
+            gameMode = 'bot';
+            myRole = 1;
+            document.getElementById('label-p1').innerText = "PECAS BRANCAS (Você)";
+            document.getElementById('label-p2').innerText = "PECAS PRETAS (Bot)";
+            showScreen('screen-game');
+            resetGame();
+        }
+
+        function showOnlineMenu() {
+            showScreen('screen-online');
+        }
+
+        function returnToMenu() {
+            if (peer) peer.destroy();
+            showScreen('screen-menu');
+        }
+
+        // --- SISTEMA ONLINE (PEERJS) ---
+        function hostOnlineGame() {
+            gameMode = 'online';
+            myRole = 1; // Host joga de Brancas
+            document.getElementById('label-p1').innerText = "SUAS PEÇAS (Brancas)";
+            document.getElementById('label-p2').innerText = "AMIGO (Pretas)";
+            showScreen('screen-game');
+            resetGame();
+
+            document.getElementById('status').innerText = "Criando sala...";
+            peer = new Peer();
+            peer.on('open', (id) => {
+                prompt("Sua sala foi criada! Copie este código e envie para o seu amigo:", id);
+                document.getElementById('status').innerText = "Aguardando o amigo entrar na sala...";
+            });
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupConnection();
+                document.getElementById('status').innerText = "Amigo conectado! Sua vez (Brancas).";
+            });
+        }
+
+        function joinOnlineGame() {
+            let roomId = document.getElementById('room-code-input').value.trim();
+            if (!roomId) {
+                alert("Cole o código da sala fornecido pelo seu amigo.");
+                return;
+            }
+            gameMode = 'online';
+            myRole = -1; // Cliente joga de Pretas
+            document.getElementById('label-p1').innerText = "AMIGO (Brancas)";
+            document.getElementById('label-p2').innerText = "SUAS PEÇAS (Pretas)";
+            showScreen('screen-game');
+            resetGame();
+
+            document.getElementById('status').innerText = "Conectando à sala...";
+            peer = new Peer();
+            peer.on('open', () => {
+                conn = peer.connect(roomId);
+                setupConnection();
+                document.getElementById('status').innerText = "Conectado! Aguarde a jogada das Brancas.";
+            });
+        }
+
+        function setupConnection() {
+            conn.on('data', (data) => {
+                board = data.board;
+                turn = data.turn;
+                gameOver = data.gameOver;
+                if (gameOver) {
+                    endGame(data.winTitle, data.winDesc);
+                }
+                renderBoard();
+            });
+        }
+
+        function sendNetworkMove(winTitle = null, winDesc = null) {
+            if (gameMode === 'online' && conn && conn.open) {
+                conn.send({ board, turn, gameOver, winTitle, winDesc });
+            }
+        }
+
+        // --- LÓGICA DO TABULEIRO ---
         function initBoard() {
             board = Array(8).fill(null).map(() => Array(8).fill(0));
             for (let r = 0; r < 3; r++) {
@@ -205,7 +350,9 @@
 
                         const piece = document.createElement('div');
                         piece.className = `piece ${val > 0 ? 'white' : 'black'} ${Math.abs(val) === 2 ? 'king' : ''}`;
-                        piece.draggable = (turn === 1 && val > 0 && !gameOver);
+                        
+                        let isMyPiece = (turn === myRole && Math.sign(val) === Math.sign(myRole));
+                        piece.draggable = (isMyPiece && !gameOver);
 
                         piece.addEventListener('dragstart', (e) => {
                             if (mustJumpPiece && (mustJumpPiece.r !== r || mustJumpPiece.c !== c)) {
@@ -256,9 +403,12 @@
 
             if (!gameOver) {
                 if (realWhite === 0) {
-                    endGame("O Bot Venceu!", "Suas peças acabaram.");
+                    endGame("As Pretas Venceram!", "Todas as peças brancas foram capturadas.");
                 } else if (realBlack === 0) {
-                    endGame("Parabéns, Você Venceu!", "Você eliminou todas as peças do Bot!");
+                    endGame("As Brancas Venceram!", "Todas as peças pretas foram capturadas.");
+                } else if (gameMode === 'bot' || gameMode === 'online') {
+                    let turnText = (turn === myRole) ? "Sua vez" : "Vez do Adversário";
+                    document.getElementById('status').innerText = turnText;
                 }
             }
         }
@@ -268,12 +418,12 @@
             document.getElementById('modal-title').innerText = title;
             document.getElementById('modal-desc').innerText = desc;
             document.getElementById('game-modal').style.display = 'flex';
-            document.getElementById('status').innerText = title;
+            sendNetworkMove(title, desc);
         }
 
         function playerSurrender() {
             if (gameOver) return;
-            endGame("Você Desistiu!", "O Bot leva a vitória desta vez.");
+            endGame("Você Desistiu", "O adversário venceu a partida.");
         }
 
         function getMovesForPiece(r, c, currentBoard) {
@@ -334,31 +484,11 @@
             return moves;
         }
 
-        function getAllMoves(playerColor, currentBoard) {
-            let allMoves = [];
-            let hasJump = false;
-
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    if (Math.sign(currentBoard[r][c]) === Math.sign(playerColor)) {
-                        if (mustJumpPiece && (mustJumpPiece.r !== r || mustJumpPiece.c !== c)) continue;
-                        let moves = getMovesForPiece(r, c, currentBoard);
-                        moves.forEach(m => {
-                            if (m.jump) hasJump = true;
-                            allMoves.push({ fromR: r, fromC: c, toR: m.r, toC: m.c, jump: m.jump });
-                        });
-                    }
-                }
-            }
-            if (hasJump) allMoves = allMoves.filter(m => m.jump !== null);
-            return allMoves;
-        }
-
         function onSquareClick(r, c) {
-            if (gameOver || turn !== 1) return;
+            if (gameOver || turn !== myRole) return;
 
             let val = board[r][c];
-            if (val > 0) {
+            if (Math.sign(val) === Math.sign(myRole)) {
                 if (mustJumpPiece && (mustJumpPiece.r !== r || mustJumpPiece.c !== c)) return;
                 selectedPiece = { row: r, col: c };
                 validMoves = getMovesForPiece(r, c, board);
@@ -388,41 +518,34 @@
 
             if (didJump) {
                 let nextJumps = getMovesForPiece(toR, toC, board).filter(m => m.jump !== null);
-                if (nextJumps.length > 0 && turn === 1) {
+                if (nextJumps.length > 0 && turn === myRole) {
                     mustJumpPiece = { r: toR, c: toC };
                     selectedPiece = { row: toR, col: toC };
                     validMoves = nextJumps;
                     renderBoard();
-                    document.getElementById('status').innerText = "Captura múltipla! Jogue novamente com a mesma peça.";
                     return;
                 }
             }
 
             mustJumpPiece = null;
+            turn = turn * -1;
             renderBoard();
 
-            if (!gameOver) {
-                turn = -1;
-                document.getElementById('status').innerText = "Vez do Bot (Calculando melhor jogada e risco...)";
+            sendNetworkMove();
+
+            if (gameMode === 'bot' && turn === -1 && !gameOver) {
                 setTimeout(botTurn, 600);
             }
         }
 
+        // --- BOT ---
         function botTurn() {
             if (gameOver) return;
-
-            let currentScore = evaluateBoard(board);
-            if (currentScore < -80) {
-                endGame("O Bot Desistiu!", "Você esmagou a estratégia dele e ele reconheceu a derrota!");
-                return;
-            }
-
-            let bestMove = getBestMove(board, 4);
+            let bestMove = getBestMove(board, 3);
             if (!bestMove) {
-                endGame("Parabéns, Você Venceu!", "O Bot ficou sem jogadas possíveis!");
+                endGame("Parabéns, Você Venceu!", "O Bot não tem jogadas!");
                 return;
             }
-
             executeBotMoveChain(bestMove);
         }
 
@@ -450,20 +573,18 @@
                             toR: bestChainMove.r, toC: bestChainMove.c,
                             jump: bestChainMove.jump
                         });
-                    }, 400);
+                    }, 350);
                     return;
                 }
             }
 
             turn = 1;
-            document.getElementById('status').innerText = "Sua vez (Brancas)";
             renderBoard();
         }
 
         function getBestMove(currentBoard, depth) {
             let moves = getAllMoves(-1, currentBoard);
             if (moves.length === 0) return null;
-
             let bestScore = -Infinity;
             let bestMove = moves[0];
 
@@ -486,9 +607,7 @@
 
         function minimax(currentBoard, depth, isMaximizing, alpha, beta) {
             let moves = getAllMoves(isMaximizing ? -1 : 1, currentBoard);
-            if (depth === 0 || moves.length === 0) {
-                return evaluateBoard(currentBoard);
-            }
+            if (depth === 0 || moves.length === 0) return evaluateBoard(currentBoard);
 
             if (isMaximizing) {
                 let maxEval = -Infinity;
@@ -546,13 +665,9 @@
             validMoves = [];
             mustJumpPiece = null;
             document.getElementById('game-modal').style.display = 'none';
-            document.getElementById('status').innerText = "Sua vez (Brancas)";
             initBoard();
             renderBoard();
         }
-
-        initBoard();
-        renderBoard();
     </script>
 </body>
 </html>
