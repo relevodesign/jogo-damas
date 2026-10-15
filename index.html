@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joguinho de Damas - HTML5 & Bot Estratégico</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            user-select: none;
+        }
+        h1 { font-size: 1.8rem; margin-bottom: 6px; color: #38bdf8; letter-spacing: 1px; }
+        #status { font-size: 1.1rem; margin-bottom: 16px; color: #94a3b8; font-weight: 500; }
+        
+        .container {
+            display: flex;
+            gap: 24px;
+            background: #1e293b;
+            padding: 24px;
+            border-radius: 14px;
+            border: 1px solid #334155;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+            align-items: center;
+            position: relative;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(8, 65px);
+            grid-template-rows: repeat(8, 65px);
+            border: 4px solid #0f172a;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        .square {
+            width: 65px;
+            height: 65px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            cursor: pointer;
+        }
+        .light { background-color: #e2e8f0; }
+        .dark { background-color: #334155; }
+        .square.highlight::after {
+            content: '';
+            width: 22px;
+            height: 22px;
+            background-color: rgba(0, 230, 118, 0.6);
+            border-radius: 50%;
+            position: absolute;
+            pointer-events: none;
+        }
+        .square.selected { background-color: #475569 !important; }
+        .square.drag-over { background-color: #64748b !important; }
+
+        .piece {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.3);
+            transition: transform 0.1s ease;
+            cursor: grab;
+            z-index: 2;
+        }
+        .piece:active { cursor: grabbing; }
+        .piece.white {
+            background: radial-gradient(circle at 30% 30%, #f8fafc, #cbd5e1);
+            border: 2px solid #94a3b8;
+        }
+        .piece.black {
+            background: radial-gradient(circle at 30% 30%, #475569, #0f172a);
+            border: 2px solid #1e293b;
+        }
+        .piece.king::after { content: '👑'; font-size: 1.3rem; }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            width: 210px;
+        }
+        .panel {
+            background: #0f172a;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+        .panel h3 { font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px; }
+        .panel p { font-size: 1.2rem; font-weight: bold; color: #f8fafc; }
+        
+        button {
+            background-color: #00c853;
+            color: #000;
+            border: none;
+            padding: 11px;
+            font-size: 0.95rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #00e676; }
+        button.btn-danger { background-color: #ef4444; color: #fff; }
+        button.btn-danger:hover { background-color: #f87171; }
+
+        #game-modal {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+            z-index: 10;
+        }
+        #game-modal h2 { font-size: 2.2rem; margin-bottom: 12px; color: #facc15; text-align: center; }
+        #game-modal p { font-size: 1.1rem; color: #94a3b8; margin-bottom: 20px; text-align: center; }
+        .modal-buttons { display: flex; gap: 12px; }
+    </style>
+</head>
+<body>
+
+    <h1>JOGO DE DAMAS</h1>
+    <div id="status">Sua vez (Brancas)</div>
+
+    <div class="container">
+        <div id="board"></div>
+
+        <div class="sidebar">
+            <div class="panel">
+                <h3>PECAS BRANCAS (Você)</h3>
+                <p id="count-white">12</p>
+            </div>
+            <div class="panel">
+                <h3>PECAS PRETAS (Bot)</h3>
+                <p id="count-black">12</p>
+            </div>
+            <button onclick="resetGame()">Reiniciar Jogo</button>
+            <button class="btn-danger" onclick="playerSurrender()">Desistir da Partida</button>
+        </div>
+
+        <div id="game-modal">
+            <h2 id="modal-title">Fim de Jogo</h2>
+            <p id="modal-desc">O jogo chegou ao fim.</p>
+            <div class="modal-buttons">
+                <button onclick="resetGame()">Jogar Novamente</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let board = [];
+        let turn = 1; // 1 = brancas (jogador), -1 = pretas (bot)
+        let selectedPiece = null;
+        let validMoves = [];
+        let gameOver = false;
+        let mustJumpPiece = null;
+
+        function initBoard() {
+            board = Array(8).fill(null).map(() => Array(8).fill(0));
+            for (let r = 0; r < 3; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if ((r + c) % 2 === 1) board[r][c] = -1;
+                }
+            }
+            for (let r = 5; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if ((r + c) % 2 === 1) board[r][c] = 1;
+                }
+            }
+        }
+
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+
+            let realWhite = 0, realBlack = 0;
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const square = document.createElement('div');
+                    square.className = `square ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
+                    square.dataset.row = r;
+                    square.dataset.col = c;
+
+                    const val = board[r][c];
+                    if (val !== 0) {
+                        if (val > 0) realWhite++;
+                        else realBlack++;
+
+                        const piece = document.createElement('div');
+                        piece.className = `piece ${val > 0 ? 'white' : 'black'} ${Math.abs(val) === 2 ? 'king' : ''}`;
+                        piece.draggable = (turn === 1 && val > 0 && !gameOver);
+
+                        piece.addEventListener('dragstart', (e) => {
+                            if (mustJumpPiece && (mustJumpPiece.r !== r || mustJumpPiece.c !== c)) {
+                                e.preventDefault();
+                                return;
+                            }
+                            selectedPiece = { row: r, col: c };
+                            validMoves = getMovesForPiece(r, c, board);
+                            e.dataTransfer.setData('text/plain', JSON.stringify({ r, c }));
+                            setTimeout(renderBoard, 10);
+                        });
+
+                        square.appendChild(piece);
+                    }
+
+                    if (selectedPiece && selectedPiece.row === r && selectedPiece.col === c) {
+                        square.classList.add('selected');
+                    }
+                    if (validMoves.some(m => m.r === r && m.c === c)) {
+                        square.classList.add('highlight');
+                    }
+
+                    square.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        if (validMoves.some(m => m.r === r && m.c === c)) {
+                            square.classList.add('drag-over');
+                        }
+                    });
+                    square.addEventListener('dragleave', () => {
+                        square.classList.remove('drag-over');
+                    });
+                    square.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        square.classList.remove('drag-over');
+                        if (validMoves.some(m => m.r === r && m.c === c)) {
+                            let move = validMoves.find(m => m.r === r && m.c === c);
+                            makeMove(selectedPiece.row, selectedPiece.col, r, c, move.jump);
+                        }
+                    });
+
+                    square.addEventListener('click', () => onSquareClick(r, c));
+                    boardEl.appendChild(square);
+                }
+            }
+
+            document.getElementById('count-white').innerText = realWhite;
+            document.getElementById('count-black').innerText = realBlack;
+
+            if (!gameOver) {
+                if (realWhite === 0) {
+                    endGame("O Bot Venceu!", "Suas peças acabaram.");
+                } else if (realBlack === 0) {
+                    endGame("Parabéns, Você Venceu!", "Você eliminou todas as peças do Bot!");
+                }
+            }
+        }
+
+        function endGame(title, desc) {
+            gameOver = true;
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-desc').innerText = desc;
+            document.getElementById('game-modal').style.display = 'flex';
+            document.getElementById('status').innerText = title;
+        }
+
+        function playerSurrender() {
+            if (gameOver) return;
+            endGame("Você Desistiu!", "O Bot leva a vitória desta vez.");
+        }
+
+        function getMovesForPiece(r, c, currentBoard) {
+            let val = currentBoard[r][c];
+            if (val === 0) return [];
+            let moves = [];
+            let isKing = Math.abs(val) === 2;
+            let enemyVal = val > 0 ? -1 : 1;
+            let directions = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+            if (!isKing) {
+                let allowedDirs = val > 0 ? [[-1, -1], [-1, 1]] : [[1, -1], [1, 1]];
+                allowedDirs.forEach(([dr, dc]) => {
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8 && currentBoard[nr][nc] === 0) {
+                        moves.push({ r: nr, c: nc, jump: null });
+                    }
+                });
+
+                directions.forEach(([dr, dc]) => {
+                    let nr = r + dr, nc = c + dc;
+                    let nnr = r + dr * 2, nnc = c + dc * 2;
+                    if (nnr >= 0 && nnr < 8 && nnc >= 0 && nnc < 8) {
+                        let middleVal = currentBoard[nr][nc];
+                        if (middleVal !== 0 && Math.sign(middleVal) === Math.sign(enemyVal) && currentBoard[nnr][nnc] === 0) {
+                            moves.push({ r: nnr, c: nnc, jump: { r: nr, c: nc } });
+                        }
+                    }
+                });
+            } else {
+                directions.forEach(([dr, dc]) => {
+                    let foundEnemy = null;
+                    let steps = 1;
+                    while (true) {
+                        let nr = r + dr * steps;
+                        let nc = c + dc * steps;
+                        if (nr < 0 || nr >= 8 || nc < 0 || nc >= 8) break;
+
+                        let targetVal = currentBoard[nr][nc];
+                        if (targetVal === 0) {
+                            if (foundEnemy === null) {
+                                moves.push({ r: nr, c: nc, jump: null });
+                            } else {
+                                moves.push({ r: nr, c: nc, jump: { r: foundEnemy.r, c: foundEnemy.c } });
+                            }
+                        } else {
+                            if (Math.sign(targetVal) === Math.sign(enemyVal)) {
+                                if (foundEnemy === null) foundEnemy = { r: nr, c: nc };
+                                else break;
+                            } else {
+                                break;
+                            }
+                        }
+                        steps++;
+                    }
+                });
+            }
+            return moves;
+        }
+
+        function getAllMoves(playerColor, currentBoard) {
+            let allMoves = [];
+            let hasJump = false;
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if (Math.sign(currentBoard[r][c]) === Math.sign(playerColor)) {
+                        if (mustJumpPiece && (mustJumpPiece.r !== r || mustJumpPiece.c !== c)) continue;
+                        let moves = getMovesForPiece(r, c, currentBoard);
+                        moves.forEach(m => {
+                            if (m.jump) hasJump = true;
+                            allMoves.push({ fromR: r, fromC: c, toR: m.r, toC: m.c, jump: m.jump });
+                        });
+                    }
+                }
+            }
+            if (hasJump) allMoves = allMoves.filter(m => m.jump !== null);
+            return allMoves;
+        }
+
+        function onSquareClick(r, c) {
+            if (gameOver || turn !== 1) return;
+
+            let val = board[r][c];
+            if (val > 0) {
+                if (mustJumpPiece && (mustJumpPiece.r !== r || mustJumpPiece.c !== c)) return;
+                selectedPiece = { row: r, col: c };
+                validMoves = getMovesForPiece(r, c, board);
+                renderBoard();
+            } else if (selectedPiece && validMoves.some(m => m.r === r && m.c === c)) {
+                let move = validMoves.find(m => m.r === r && m.c === c);
+                makeMove(selectedPiece.row, selectedPiece.col, r, c, move.jump);
+            }
+        }
+
+        function makeMove(fromR, fromC, toR, toC, jump) {
+            let piece = board[fromR][fromC];
+            board[fromR][fromC] = 0;
+            board[toR][toC] = piece;
+
+            let didJump = false;
+            if (jump) {
+                board[jump.r][jump.c] = 0;
+                didJump = true;
+            }
+
+            if (piece === 1 && toR === 0) board[toR][toC] = 2;
+            if (piece === -1 && toR === 7) board[toR][toC] = -2;
+
+            selectedPiece = null;
+            validMoves = [];
+
+            if (didJump) {
+                let nextJumps = getMovesForPiece(toR, toC, board).filter(m => m.jump !== null);
+                if (nextJumps.length > 0 && turn === 1) {
+                    mustJumpPiece = { r: toR, c: toC };
+                    selectedPiece = { row: toR, col: toC };
+                    validMoves = nextJumps;
+                    renderBoard();
+                    document.getElementById('status').innerText = "Captura múltipla! Jogue novamente com a mesma peça.";
+                    return;
+                }
+            }
+
+            mustJumpPiece = null;
+            renderBoard();
+
+            if (!gameOver) {
+                turn = -1;
+                document.getElementById('status').innerText = "Vez do Bot (Calculando melhor jogada e risco...)";
+                setTimeout(botTurn, 600);
+            }
+        }
+
+        function botTurn() {
+            if (gameOver) return;
+
+            let currentScore = evaluateBoard(board);
+            if (currentScore < -80) {
+                endGame("O Bot Desistiu!", "Você esmagou a estratégia dele e ele reconheceu a derrota!");
+                return;
+            }
+
+            let bestMove = getBestMove(board, 4);
+            if (!bestMove) {
+                endGame("Parabéns, Você Venceu!", "O Bot ficou sem jogadas possíveis!");
+                return;
+            }
+
+            executeBotMoveChain(bestMove);
+        }
+
+        function executeBotMoveChain(move) {
+            let piece = board[move.fromR][move.fromC];
+            board[move.fromR][move.fromC] = 0;
+            board[move.toR][move.toC] = piece;
+
+            let didJump = false;
+            if (move.jump) {
+                board[move.jump.r][move.jump.c] = 0;
+                didJump = true;
+            }
+
+            if (piece === -1 && move.toR === 7) board[move.toR][move.toC] = -2;
+            renderBoard();
+
+            if (didJump) {
+                let nextJumps = getMovesForPiece(move.toR, move.toC, board).filter(m => m.jump !== null);
+                if (nextJumps.length > 0) {
+                    let bestChainMove = nextJumps[0];
+                    setTimeout(() => {
+                        executeBotMoveChain({
+                            fromR: move.toR, fromC: move.toC,
+                            toR: bestChainMove.r, toC: bestChainMove.c,
+                            jump: bestChainMove.jump
+                        });
+                    }, 400);
+                    return;
+                }
+            }
+
+            turn = 1;
+            document.getElementById('status').innerText = "Sua vez (Brancas)";
+            renderBoard();
+        }
+
+        function getBestMove(currentBoard, depth) {
+            let moves = getAllMoves(-1, currentBoard);
+            if (moves.length === 0) return null;
+
+            let bestScore = -Infinity;
+            let bestMove = moves[0];
+
+            for (let move of moves) {
+                let tempBoard = currentBoard.map(row => [...row]);
+                let piece = tempBoard[move.fromR][move.fromC];
+                tempBoard[move.fromR][move.fromC] = 0;
+                tempBoard[move.toR][move.toC] = piece;
+                if (move.jump) tempBoard[move.jump.r][move.jump.c] = 0;
+                if (piece === -1 && move.toR === 7) tempBoard[move.toR][move.toC] = -2;
+
+                let score = minimax(tempBoard, depth - 1, false, -Infinity, Infinity);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = move;
+                }
+            }
+            return bestMove;
+        }
+
+        function minimax(currentBoard, depth, isMaximizing, alpha, beta) {
+            let moves = getAllMoves(isMaximizing ? -1 : 1, currentBoard);
+            if (depth === 0 || moves.length === 0) {
+                return evaluateBoard(currentBoard);
+            }
+
+            if (isMaximizing) {
+                let maxEval = -Infinity;
+                for (let move of moves) {
+                    let tempBoard = currentBoard.map(row => [...row]);
+                    let piece = tempBoard[move.fromR][move.fromC];
+                    tempBoard[move.fromR][move.fromC] = 0;
+                    tempBoard[move.toR][move.toC] = piece;
+                    if (move.jump) tempBoard[move.jump.r][move.jump.c] = 0;
+                    if (piece === -1 && move.toR === 7) tempBoard[move.toR][move.toC] = -2;
+
+                    let evaluation = minimax(tempBoard, depth - 1, false, alpha, beta);
+                    maxEval = Math.max(maxEval, evaluation);
+                    alpha = Math.max(alpha, evaluation);
+                    if (beta <= alpha) break;
+                }
+                return maxEval;
+            } else {
+                let minEval = Infinity;
+                for (let move of moves) {
+                    let tempBoard = currentBoard.map(row => [...row]);
+                    let piece = tempBoard[move.fromR][move.fromC];
+                    tempBoard[move.fromR][move.fromC] = 0;
+                    tempBoard[move.toR][move.toC] = piece;
+                    if (move.jump) tempBoard[move.jump.r][move.jump.c] = 0;
+                    if (piece === 1 && move.toR === 0) tempBoard[move.toR][move.toC] = 2;
+
+                    let evaluation = minimax(tempBoard, depth - 1, true, alpha, beta);
+                    minEval = Math.min(minEval, evaluation);
+                    beta = Math.min(beta, evaluation);
+                    if (beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        function evaluateBoard(currentBoard) {
+            let score = 0;
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    let val = currentBoard[r][c];
+                    if (val === -1) score += 10 + (7 - r);
+                    if (val === -2) score += 35;
+                    if (val === 1) score -= 10 + r;
+                    if (val === 2) score -= 35;
+                }
+            }
+            return score;
+        }
+
+        function resetGame() {
+            gameOver = false;
+            turn = 1;
+            selectedPiece = null;
+            validMoves = [];
+            mustJumpPiece = null;
+            document.getElementById('game-modal').style.display = 'none';
+            document.getElementById('status').innerText = "Sua vez (Brancas)";
+            initBoard();
+            renderBoard();
+        }
+
+        initBoard();
+        renderBoard();
+    </script>
+</body>
+</html>
