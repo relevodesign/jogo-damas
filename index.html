@@ -160,6 +160,7 @@
         }
         #game-modal h2 { font-size: 2.2rem; margin-bottom: 12px; color: #facc15; text-align: center; }
         #game-modal p { font-size: 1.1rem; color: #94a3b8; margin-bottom: 20px; text-align: center; }
+        .modal-buttons { display: flex; gap: 10px; }
     </style>
 </head>
 <body>
@@ -632,5 +633,27 @@
                     tempBoard[move.fromR][move.fromC] = 0;
                     tempBoard[move.toR][move.toC] = piece;
                     if (move.jump) tempBoard[move.jump.r][move.jump.c] = 0;
-                    if (piece === 1 && move.toR === 0) tempBoard[move.toR][move.toC] =ეცpecial; // correção sintática
-                    // ... (demais blocos mantidos idênticos)
+                    if (piece === 1 && move.toR === 0) tempBoard[move.toR][move.toC] = 2;
+
+                    let evaluation = minimax(tempBoard, depth - 1, true, alpha, beta);
+                    minEval = Math.min(minEval, evaluation);
+                    beta = Math.min(beta, evaluation);
+                    if (beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        function evaluateBoard(currentBoard) {
+            let score = 0;
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    let val = currentBoard[r][c];
+                    if (val === -1) score += 10 + (7 - r);
+                    if (val === -2) score += 35;
+                    if (val === 1) score -= 10 + r;
+                    if (val === 2) score -= 35;
+                }
+            }
+            return score;
+        }
